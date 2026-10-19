@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Send the focused Hermes session id with `shell.exec` so vault detection, reading and saving work on Hermes 0.22.1 and later, which run shell commands for one local session. Gateways that refuse the `session_id` key are served by a retry without it. When no conversation is focused, the plugin reports it in English and French instead of "not a valid Obsidian vault".
+
 ## 0.5.2 - 2026-11-15
 
 - Put the explorer toggle on the left and the context-panel toggle on the right.
