@@ -55,6 +55,9 @@ api.configure()
   sandbox.host.state = {}
   sandbox.host.request = async () => { throw new Error('invalid_params') }
   await assert.rejects(api.shellExec('synthetic'), /Ouvrez d'abord une conversation Hermes/, 'a session-scoped gateway without a focused session yields a localized refusal')
+  sandbox.host.state = { focusedSessionId: { get: () => 'runtime-1' } }
+  sandbox.host.request = async () => { throw new Error('permission_denied') }
+  await assert.rejects(api.shellExec('synthetic'), /terminal local/, 'a non-local session refusal is not mistaken for an invalid vault')
   sandbox.host.request = async () => ({ error: 'synthetic failure' })
   sandbox.host.state = { focusedSessionId: { get: () => 'runtime-1' } }
   const draft = { text: 'Open Note in Obsidian', attachments: [{ id: 'user-file', refText: 'user reference' }] }

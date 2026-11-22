@@ -73,6 +73,7 @@ const LOCALES = {
     messageIndexingTags: "Indexing tags…",
     messageNoResults: "No results",
     messageNoActiveConversation: "Open a Hermes conversation first: Vault View runs its file commands through the active session",
+    messageShellSessionNotPermitted: "Vault View needs a local-terminal conversation to access files on this machine",
     messageTheShellRequestFailed: "The shell request failed",
     messageTheShellCommandFailed: "The shell command failed",
     messageTheCommandFailedWithExitCode: "The command failed with exit code ",
@@ -270,6 +271,7 @@ const LOCALES = {
     messageIndexingTags: "Recherche des tags…",
     messageNoResults: "Aucun résultat",
     messageNoActiveConversation: "Ouvrez d'abord une conversation Hermes : Vault View exécute ses commandes de fichiers via la session active",
+    messageShellSessionNotPermitted: "Vault View a besoin d'une conversation avec terminal local pour accéder aux fichiers sur cette machine",
     messageTheShellRequestFailed: "La requête shell a échoué",
     messageTheShellCommandFailed: "La commande shell a échoué",
     messageTheCommandFailedWithExitCode: "La commande a échoué avec le code ",
@@ -978,9 +980,22 @@ function shellSessionId(state = host && host.state) {
   return String(focused || active || '')
 }
 
+function shellRpcReason(error) {
+  if (!error) return ''
+  return String(error.message || error.reason || (error.data && error.data.reason) || '')
+}
+
 function isInvalidParamsError(error) {
-  const reason = error && (error.message || error.reason || (error.data && error.data.reason))
-  return String(reason || '') === 'invalid_params'
+  return shellRpcReason(error) === 'invalid_params'
+}
+
+function isPermissionDeniedError(error) {
+  return shellRpcReason(error) === 'permission_denied'
+}
+
+function isVaultShellPolicyMessage(message) {
+  const text = String(message || '')
+  return text === t('messageNoActiveConversation') || text === t('messageShellSessionNotPermitted')
 }
 
 async function shellExec(command) {
@@ -991,12 +1006,16 @@ async function shellExec(command) {
     // earlier gateways refuse the session_id key, so the request is retried without it.
     response = await host.request('shell.exec', sessionId ? { command: command, session_id: sessionId } : { command: command })
   } catch (error) {
+    if (isPermissionDeniedError(error)) throw new Error(t('messageShellSessionNotPermitted'))
     if (!isInvalidParamsError(error)) throw error
     if (!sessionId) throw new Error(t('messageNoActiveConversation'))
     response = await host.request('shell.exec', { command: command })
   }
   const payload = response && response.result ? response.result : response
-  if (response && response.error) throw new Error(t('messageTheShellRequestFailed'))
+  if (response && response.error) {
+    if (isPermissionDeniedError(response.error)) throw new Error(t('messageShellSessionNotPermitted'))
+    throw new Error(t('messageTheShellRequestFailed'))
+  }
   if (payload && payload.error) throw new Error(t('messageTheShellCommandFailed'))
   if (payload && typeof payload.code === 'number' && payload.code !== 0) {
     throw new Error(getStderr(response) || t('messageTheCommandFailedWithExitCode') + payload.code)
@@ -1016,7 +1035,8 @@ async function validateVaultRoot(path) {
   try {
     const result = await shellExec('if [ -d ' + shellQuote(joinPath(root, '.obsidian')) + " ]; then printf 'valid'; fi")
     return getStdout(result).trim() === 'valid'
-  } catch {
+  } catch (error) {
+    if (isVaultShellPolicyMessage(error && error.message)) throw error
     return false
   }
 }
@@ -4855,8 +4875,13 @@ function MainPane({ tabId = DEFAULT_TAB_ID, initialPath = '', preserveEmpty = fa
       notifyError(new Error(t('invalidVault')), NAME)
       return
     }
-    if (!(await validateVaultRoot(next))) {
-      notifyError(new Error(t('invalidVault')), NAME)
+    try {
+      if (!(await validateVaultRoot(next))) {
+        notifyError(new Error(t('invalidVault')), NAME)
+        return
+      }
+    } catch (error) {
+      notifyError(error instanceof Error ? error : new Error(String(error)), NAME)
       return
     }
     if (dirty && !(await save())) return
